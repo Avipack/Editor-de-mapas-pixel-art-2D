@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Editor de Mapas 2D (rápido y con imágenes)</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; }
+        canvas { border: 2px solid #333; margin: 10px; }
+        .panel { margin: 10px; }
+        button, input { padding: 6px 10px; margin: 5px; }
+        .info { color: #555; }
+    </style>
+</head>
+<body>
+    <h2>🗺️ Editor de mapas (con imágenes en vivo)</h2>
+    <div class="panel">
+        <label>Columnas: <input id="cols" type="number" value="5" min="1" max="50"></label>
+        <label>Filas: <input id="rows" type="number" value="5" min="1" max="50"></label>
+        <button id="btnResize">Redimensionar</button>
+        <button id="btnExport">⬇ Exportar mapa</button>
+        <button id="btnClear">🧹 Limpiar (todo césped)</button>
+    </div>
+    <canvas id="canvas"></canvas>
+    <p class="info">Haz clic en una celda para asignarle una imagen y solidez.</p>
+    <p class="info">Imágenes disponibles: <span id="listaImagenes">c.jpg, ar.jpg, ab.jpg (deben estar en la carpeta)</span></p>
+
+    <script>
+        const TILE_SIZE = 32;  // tamaño de celda en pantalla
+        let cols = 5;
+        let rows = 5;
+        let mapa = [];
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Caché de imágenes: { 'c.jpg': Image, ... }
+        const cacheImagenes = {};
+
+        // Lista de imágenes que vamos a precargar (añade aquí las tuyas)
+        const LISTA_IMAGENES = ['c.jpg', 'ar.jpg', 'ab.jpg'];
+
+        // Colores de respaldo mientras se carga una imagen o si no existe
+        const coloresRespaldo = {
+            'c.jpg': '#7ec850',
+            'ar.jpg': '#2d5a27',
+            'ab.jpg': '#1e4420'
+        };
+
+        // Precargar todas las imágenes al iniciar
+        function precargarImagenes() {
+            let cargadas = 0;
+            return new Promise(resolve => {
+                if (LISTA_IMAGENES.length === 0) resolve();
+                LISTA_IMAGENES.forEach(nombre => {
+                    const img = new Image();
+                    img.onload = img.onerror = () => {
+                        // Aunque falle, guardamos la imagen (se usará color de respaldo)
+                        cacheImagenes[nombre] = img;
+                        cargadas++;
+                        if (cargadas === LISTA_IMAGENES.length) resolve();
+                    };
+                    img.src = nombre;
+                });
+            });
+        }
+
+        function iniciarMapa() {
+            mapa = [];
+            for (let y = 0; y < rows; y++) {
+                const fila = [];
+                for (let x = 0; x < cols; x++) {
+                    fila.push({ img: 'c.jpg', solid: false });
+                }
+                mapa.push(fila);
+            }
+            dibujarMapa();
+        }
+
+        function dibujarMapa() {
+            canvas.width = cols * TILE_SIZE;
+            canvas.height = rows * TILE_SIZE;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    const celda = mapa[y][x];
+                    const nombreImg = celda.img;
+
+                    // Dibujar la imagen desde caché si está disponible
+                    const img = cacheImagenes[nombreImg];
+                    if (img && img.complete && img.naturalWidth > 0) {
+                        ctx.drawImage(img, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    } else {
+                        // Color de respaldo
+                        ctx.fillStyle = coloresRespaldo[nombreImg] || '#cccccc';
+                        ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    }
+
+                    // Borde de la celda
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+
+                    // Indicador de colisión
+                    if (celda.solid) {
+                        ctx.fillStyle = 'rgba(255,0,0,0.7)';
+                        ctx.font = 'bold 18px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText('⛓', x * TILE_SIZE + TILE_SIZE/2, y * TILE_SIZE + TILE_SIZE/2);
+                    }
+                }
+            }
+        }
+
+        // Manejar clic en el canvas
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            const celdaX = Math.floor(mouseX / TILE_SIZE);
+            const celdaY = Math.floor(mouseY / TILE_SIZE);
+
+            if (celdaX >= 0 && celdaX < cols && celdaY >= 0 && celdaY < rows) {
+                // Pedir nombre de imagen
+                let nombreImg = prompt('Nombre del archivo de imagen (ej: c.jpg, ar.jpg, ab.jpg):', mapa[celdaY][celdaX].img);
+                if (nombreImg === null || nombreImg.trim() === '') return;
+                nombreImg = nombreImg.trim();
+
+                // Si no está en la caché, la añadimos dinámicamente (por si el usuario usa nuevas imágenes)
+                if (!cacheImagenes[nombreImg]) {
+                    const nuevaImg = new Image();
+                    nuevaImg.src = nombreImg;
+                    cacheImagenes[nombreImg] = nuevaImg;
+                }
+
+                // Preguntar solidez
+                let solido = confirm('¿Celda SÓLIDA? Aceptar = Sí (bloquea), Cancelar = No (transitable)');
+
+                // Actualizar
+                mapa[celdaY][celdaX] = { img: nombreImg, solid: solido };
+                dibujarMapa();
+            }
+        });
+
+        // Redimensionar
+        document.getElementById('btnResize').addEventListener('click', () => {
+            const nuevasCols = parseInt(document.getElementById('cols').value);
+            const nuevasFilas = parseInt(document.getElementById('rows').value);
+            if (nuevasCols > 0 && nuevasFilas > 0) {
+                cols = nuevasCols;
+                rows = nuevasFilas;
+                iniciarMapa();
+            }
+        });
+
+        // Limpiar (todo césped)
+        document.getElementById('btnClear').addEventListener('click', () => {
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    mapa[y][x] = { img: 'c.jpg', solid: false };
+                }
+            }
+            dibujarMapa();
+        });
+
+        // Exportar
+        document.getElementById('btnExport').addEventListener('click', () => {
+            let texto = '';
+            for (let y = 0; y < rows; y++) {
+                const celdas = mapa[y].map(c => `${c.img},${c.solid ? 1 : 0}`).join('   ');
+                texto += `Y${y}: ${celdas}\n`;
+            }
+            const blob = new Blob([texto], {type: 'text/plain'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'mapa.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        // Arrancar: precargar imágenes y luego dibujar
+        precargarImagenes().then(() => {
+            iniciarMapa();
+        });
+    </script>
+</body>
+</html>
